@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Battery Drain Test</title>
+  <style>
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100vh;
+      background: black;
+    }
+  </style>
+</head>
+<body>
+  <h1>Battery Drain Test</h1>
+  <canvas id="canvas"></canvas>
+  <script>
+    // GPU: Animate canvas with requestAnimationFrame
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    function draw() {
+      ctx.fillStyle = `hsl(${Math.random() * 360}, 100%, 50%)`;
+      ctx.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, 100, 100);
+      requestAnimationFrame(draw);
+    }
+    draw();
+
+    // CPU: Heavy computation loop
+    setInterval(() => {
+      let x = 0;
+      for (let i = 0; i < 1e7; i++) {
+        x += Math.sqrt(i);
+      }
+    }, 100);
+
+    // Sensor: Device orientation usage
+    window.addEventListener('deviceorientation', (event) => {
+      console.log(`Orientation: alpha=${event.alpha}, beta=${event.beta}, gamma=${event.gamma}`);
+    });
+
+    // Geolocation: Repeated GPS access
+    if (navigator.geolocation) {
+      setInterval(() => {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => console.log(`Location: ${pos.coords.latitude}, ${pos.coords.longitude}`),
+          (err) => console.error(err)
+        );
+      }, 5000);
+    }
+
+    // Audio: Loop silent audio to engage audio hardware
+    const audio = new Audio();
+    audio.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+    audio.loop = true;
+    audio.play().catch(() => console.log("Autoplay blocked"));
+  </script>
+</body>
+</html>
