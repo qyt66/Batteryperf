@@ -10,18 +10,25 @@
       background: black;
       color: white;
       font-family: sans-serif;
+      text-align: center;
     }
     canvas {
       display: block;
     }
+    h1, p {
+      margin: 1rem 0 0;
+      z-index: 10;
+      position: relative;
+    }
   </style>
 </head>
 <body>
-  <h1 style="text-align:center;">⚠️ Battery Load Test Running...</h1>
+  <h1>⚠️ Battery Load Test Running...</h1>
+  <p>👆 Tap anywhere to keep screen awake</p>
   <canvas id="canvas"></canvas>
 
   <script>
-    // Resize canvas to fill the screen
+    // Resize canvas
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     function resizeCanvas() {
@@ -31,7 +38,7 @@
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
 
-    // GPU: Rapid drawing to force graphical updates
+    // GPU Load
     function renderLoop() {
       for (let i = 0; i < 100; i++) {
         ctx.fillStyle = `hsl(${Math.random() * 360}, 100%, 50%)`;
@@ -41,7 +48,7 @@
     }
     renderLoop();
 
-    // CPU: Constant heavy calculations
+    // CPU Load
     function cpuBurner() {
       const start = performance.now();
       while (performance.now() - start < 100) {
@@ -51,29 +58,45 @@
     }
     cpuBurner();
 
-    // Location: Request frequently to activate GPS
+    // GPS Activation
     if (navigator.geolocation) {
       setInterval(() => {
         navigator.geolocation.getCurrentPosition(
-          pos => console.log(`GPS Activated: ${pos.coords.latitude}, ${pos.coords.longitude}`),
+          pos => console.log(`GPS: ${pos.coords.latitude}, ${pos.coords.longitude}`),
           err => console.warn("GPS error:", err)
         );
       }, 1000);
     }
 
-    // Wake Lock: Prevent screen from sleeping
-    if ('wakeLock' in navigator) {
-      navigator.wakeLock.request('screen').catch(err => {
-        console.warn("Wake Lock not granted:", err);
-      });
-    } else {
-      console.warn("Wake Lock API not supported");
-    }
-
-    // Orientation: Force sensor usage
+    // Orientation Sensor
     window.addEventListener('deviceorientation', event => {
       console.log(`Orientation: alpha=${event.alpha}, beta=${event.beta}, gamma=${event.gamma}`);
     });
+
+    // Wake Lock via Hidden Looping Video (iOS-Compatible)
+    const video = document.createElement('video');
+    video.style.position = 'absolute';
+    video.style.width = '1px';
+    video.style.height = '1px';
+    video.style.opacity = '0';
+    video.muted = true;
+    video.loop = true;
+    video.playsInline = true;
+    video.src = "data:video/mp4;base64,AAAAHGZ0eXBtcDQyAAAAAG1wNDFtcDQyaXNvbTEybXA0MnYxAAAAAW1vb3YAAABsbXZoZAAAAAB8JgABfCYAAQAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAABxpb2RzAAAAAAEAAAAMAAAD6wABAAAAAAO6AAAC3///8AAAAAAGnZHRyYWsAAABcdGtoZAAAAAB8JgABfCYAAQAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAABAAAAAAACc3RibAAAACBzdHNkAAAAAAAAAAEAAQABAAAABAAAAAABAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAABAAAADGF2YzEAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+    document.body.appendChild(video);
+
+    // Require user interaction to start
+    const tryPlay = () => {
+      video.play().then(() => {
+        console.log("Wake Lock video playing");
+      }).catch(err => {
+        console.warn("Wake Lock video blocked:", err);
+      });
+    };
+
+    document.addEventListener('click', tryPlay);
+    document.addEventListener('touchstart', tryPlay);
   </script>
 </body>
 </html>
