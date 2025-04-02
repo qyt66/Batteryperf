@@ -38,7 +38,6 @@
   <canvas id="webgl"></canvas>
 
   <script>
-    // === Resize ===
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     const webglCanvas = document.getElementById('webgl');
@@ -52,29 +51,39 @@
     window.addEventListener('resize', resizeAll);
     resizeAll();
 
-    // === Animated Canvas (GPU stress, dynamic squares) ===
-    function animateCanvas(ctx, width, height) {
-      const squareSize = 30;
-      function drawFrame() {
-        ctx.clearRect(0, 0, width, height);
-        for (let y = 0; y < height; y += squareSize) {
-          for (let x = 0; x < width; x += squareSize) {
-            ctx.fillStyle = `hsla(${(x + y + Date.now() / 10) % 360}, 100%, 50%, 0.5)`;
-            ctx.fillRect(
-              x + Math.sin(Date.now() / 300 + x) * 5,
-              y + Math.cos(Date.now() / 300 + y) * 5,
-              squareSize - 2,
-              squareSize - 2
-            );
-          }
-        }
-        requestAnimationFrame(drawFrame);
-      }
-      drawFrame();
-    }
-    animateCanvas(ctx, canvas.width, canvas.height);
+    // 🎨 Full-on Colorful Animated Squares
+    const squares = [];
+    const SQUARE_COUNT = 500;
 
-    // === WebGL Shader ===
+    for (let i = 0; i < SQUARE_COUNT; i++) {
+      squares.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        size: 10 + Math.random() * 20,
+        dx: (Math.random() - 0.5) * 2,
+        dy: (Math.random() - 0.5) * 2,
+        hue: Math.random() * 360
+      });
+    }
+
+    function animateSquares() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (let s of squares) {
+        s.x += s.dx;
+        s.y += s.dy;
+        s.hue = (s.hue + 1) % 360;
+
+        if (s.x < 0 || s.x > canvas.width) s.dx *= -1;
+        if (s.y < 0 || s.y > canvas.height) s.dy *= -1;
+
+        ctx.fillStyle = `hsla(${s.hue}, 100%, 50%, 0.6)`;
+        ctx.fillRect(s.x, s.y, s.size, s.size);
+      }
+      requestAnimationFrame(animateSquares);
+    }
+    animateSquares();
+
+    // === WebGL Shader Load ===
     const gl = webglCanvas.getContext('webgl');
     const vertexShaderSource = `attribute vec4 position; void main() { gl_Position = position; }`;
     const fragmentShaderSource = `precision mediump float;
@@ -136,6 +145,7 @@
     window.addEventListener('deviceorientation', event => {
       console.log(`Orientation: alpha=${event.alpha}, beta=${event.beta}, gamma=${event.gamma}`);
     });
+
     window.addEventListener('devicemotion', event => {
       console.log('Motion:', event.acceleration);
     });

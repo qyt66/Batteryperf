@@ -54,30 +54,40 @@
     window.addEventListener('resize', resizeAll);
     resizeAll();
 
-    // === Animated Canvas (burn-in safe) ===
-    function animateCanvas(ctx, width, height) {
-      const squareSize = 30;
-      function drawFrame() {
-        ctx.clearRect(0, 0, width, height);
-        for (let y = 0; y < height; y += squareSize) {
-          for (let x = 0; x < width; x += squareSize) {
-            ctx.fillStyle = `hsla(${(x + y + Date.now() / 10) % 360}, 100%, 50%, 0.5)`;
-            ctx.fillRect(
-              x + Math.sin(Date.now() / 200 + x) * 3,
-              y + Math.cos(Date.now() / 200 + y) * 3,
-              squareSize - 2,
-              squareSize - 2
-            );
-          }
-        }
-        requestAnimationFrame(drawFrame);
-      }
-      drawFrame();
-    }
-    animateCanvas(ctx1, canvas1.width, canvas1.height);
-    animateCanvas(ctx2, canvas2.width, canvas2.height);
+    // 🌈 Colorful Animated Squares for both canvases
+    function makeSquares(ctx, width, height) {
+      const SQUARE_COUNT = 400;
+      const squares = Array.from({ length: SQUARE_COUNT }, () => ({
+        x: Math.random() * width,
+        y: Math.random() * height,
+        size: 10 + Math.random() * 20,
+        dx: (Math.random() - 0.5) * 2,
+        dy: (Math.random() - 0.5) * 2,
+        hue: Math.random() * 360
+      }));
 
-    // === WebGL Shader Spam ===
+      function draw() {
+        ctx.clearRect(0, 0, width, height);
+        for (let s of squares) {
+          s.x += s.dx;
+          s.y += s.dy;
+          s.hue = (s.hue + 1) % 360;
+
+          if (s.x < 0 || s.x > width) s.dx *= -1;
+          if (s.y < 0 || s.y > height) s.dy *= -1;
+
+          ctx.fillStyle = `hsla(${s.hue}, 100%, 50%, 0.6)`;
+          ctx.fillRect(s.x, s.y, s.size, s.size);
+        }
+        requestAnimationFrame(draw);
+      }
+      draw();
+    }
+
+    makeSquares(ctx1, canvas1.width, canvas1.height);
+    makeSquares(ctx2, canvas2.width, canvas2.height);
+
+    // === WebGL Shader Madness ===
     const gl = webglCanvas.getContext('webgl');
     const vertSrc = `attribute vec4 position; void main() { gl_Position = position; }`;
     const fragSrc = `precision mediump float;
@@ -112,14 +122,14 @@
     }
     drawWebGL();
 
-    // === DOM Animation Pulse ===
+    // === DOM Background Flicker ===
     function animateDOM() {
       document.body.style.backgroundColor = `hsl(${Math.random() * 360}, 100%, 5%)`;
       requestAnimationFrame(animateDOM);
     }
     animateDOM();
 
-    // === Max CPU Burn ===
+    // === CPU Burn (main thread) ===
     function burnCPU() {
       const start = performance.now();
       while (performance.now() - start < 100) {
@@ -129,7 +139,7 @@
     }
     burnCPU();
 
-    // === Web Workers (Multi-core stress) ===
+    // === Multi-thread CPU Burn ===
     const WORKER_COUNT = 4;
     for (let i = 0; i < WORKER_COUNT; i++) {
       const blob = new Blob([`onmessage=function(){while(1){Math.sqrt(Math.random()*1e6);}}`], { type: 'application/javascript' });
@@ -163,7 +173,7 @@
       });
     }
 
-    // === Wake Lock Video ===
+    // === Wake Lock via 1px Silent Video ===
     const video = document.createElement('video');
     video.style.position = 'absolute';
     video.style.width = '1px';
