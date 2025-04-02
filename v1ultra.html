@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Battery Drain Test - V1 Ultra</title>
+  <title>Battery Drain Test - V1 Ultra (Fixed)</title>
   <style>
     html, body {
       margin: 0;
@@ -12,14 +12,20 @@
       font-family: sans-serif;
       text-align: center;
     }
-    canvas {
+    #webgl {
       position: absolute;
       top: 0;
       left: 0;
-      display: block;
+      z-index: 0;
+    }
+    #canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 1;
     }
     h1, p {
-      z-index: 10;
+      z-index: 2;
       position: relative;
       margin: 1rem 0 0;
       animation: pulse 2s infinite;
@@ -34,8 +40,8 @@
 <body>
   <h1>🌈 V1 Ultra — Maximum Chaos Activated</h1>
   <p>👆 Tap anywhere to keep screen awake</p>
-  <canvas id="canvas"></canvas>
   <canvas id="webgl"></canvas>
+  <canvas id="canvas"></canvas>
 
   <script>
     const canvas = document.getElementById('canvas');
@@ -51,7 +57,7 @@
     window.addEventListener('resize', resizeAll);
     resizeAll();
 
-    // 🌈 Beautiful Chaos: pixel storm
+    // 🌈 Beautiful Chaos: rainbow pixel storm
     function drawSquares() {
       for (let i = 0; i < 1000; i++) {
         ctx.fillStyle = `hsl(${Math.random() * 360}, 100%, 50%)`;
@@ -76,7 +82,7 @@
     }
     burnCPU();
 
-    // 🔥 Web Workers (multi-core CPU burn)
+    // 🔥 Web Workers (background threads)
     const WORKER_COUNT = 4;
     for (let i = 0; i < WORKER_COUNT; i++) {
       const blob = new Blob([`onmessage=function(){while(1){Math.sqrt(Math.random()*1e6);}}`], { type: 'application/javascript' });
@@ -84,15 +90,15 @@
       worker.postMessage('go');
     }
 
-    // 🎨 WebGL Shader GPU Load
-    const gl = webglCanvas.getContext('webgl');
+    // 💻 WebGL GPU Shader — runs underneath
+    const gl = webglCanvas.getContext('webgl', { premultipliedAlpha: false });
     const vertSrc = `attribute vec4 position; void main() { gl_Position = position; }`;
     const fragSrc = `precision mediump float;
       void main() {
         float r = mod(gl_FragCoord.x * gl_FragCoord.y, 255.0) / 255.0;
         float g = mod(gl_FragCoord.y, 255.0) / 255.0;
         float b = mod(gl_FragCoord.x, 255.0) / 255.0;
-        gl_FragColor = vec4(r, g, b, 1.0);
+        gl_FragColor = vec4(r, g, b, 0.1);  // Transparent!
       }`;
     const createShader = (gl, type, source) => {
       const shader = gl.createShader(type);
@@ -109,14 +115,12 @@
     gl.useProgram(program);
     const posBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-      -1, -1, 1, -1, -1, 1,
-      -1, 1, 1, -1, 1, 1
-    ]), gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
     const posLoc = gl.getAttribLocation(program, 'position');
     gl.enableVertexAttribArray(posLoc);
     gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
     function drawWebGL() {
+      gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
       requestAnimationFrame(drawWebGL);
     }
@@ -132,10 +136,11 @@
       }, 1000);
     }
 
-    // 📱 Motion sensors
+    // 📱 Motion Sensors
     window.addEventListener('deviceorientation', event => {
       console.log(`Orientation: alpha=${event.alpha}, beta=${event.beta}, gamma=${event.gamma}`);
     });
+
     window.addEventListener('devicemotion', event => {
       console.log('Motion:', event.acceleration);
     });
@@ -149,7 +154,7 @@
       });
     }
 
-    // 🔐 Wake Lock via silent video (iOS-friendly)
+    // 🔐 Wake Lock via hidden video
     const video = document.createElement('video');
     video.style.position = 'absolute';
     video.style.width = '1px';
