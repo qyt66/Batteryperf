@@ -22,6 +22,12 @@
       z-index: 10;
       position: relative;
       margin: 1rem 0 0;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0% { opacity: 0.8; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.02); }
+      100% { opacity: 0.8; transform: scale(1); }
     }
   </style>
 </head>
@@ -48,18 +54,30 @@
     window.addEventListener('resize', resizeAll);
     resizeAll();
 
-    // === Dual 2D Canvas Animation ===
-    function drawCanvas(ctx) {
-      for (let i = 0; i < 150; i++) {
-        ctx.fillStyle = `hsl(${Math.random() * 360}, 100%, 50%)`;
-        ctx.fillRect(Math.random() * canvas1.width, Math.random() * canvas1.height, 10, 10);
+    // === Animated Canvas (burn-in safe) ===
+    function animateCanvas(ctx, width, height) {
+      const squareSize = 30;
+      function drawFrame() {
+        ctx.clearRect(0, 0, width, height);
+        for (let y = 0; y < height; y += squareSize) {
+          for (let x = 0; x < width; x += squareSize) {
+            ctx.fillStyle = `hsla(${(x + y + Date.now() / 10) % 360}, 100%, 50%, 0.5)`;
+            ctx.fillRect(
+              x + Math.sin(Date.now() / 200 + x) * 3,
+              y + Math.cos(Date.now() / 200 + y) * 3,
+              squareSize - 2,
+              squareSize - 2
+            );
+          }
+        }
+        requestAnimationFrame(drawFrame);
       }
-      requestAnimationFrame(() => drawCanvas(ctx));
+      drawFrame();
     }
-    drawCanvas(ctx1);
-    drawCanvas(ctx2);
+    animateCanvas(ctx1, canvas1.width, canvas1.height);
+    animateCanvas(ctx2, canvas2.width, canvas2.height);
 
-    // === WebGL Shader Bomb ===
+    // === WebGL Shader Spam ===
     const gl = webglCanvas.getContext('webgl');
     const vertSrc = `attribute vec4 position; void main() { gl_Position = position; }`;
     const fragSrc = `precision mediump float;
@@ -69,12 +87,12 @@
         float b = mod(gl_FragCoord.x, 255.0) / 255.0;
         gl_FragColor = vec4(r, g, b, 1.0);
       }`;
-    function createShader(gl, type, source) {
+    const createShader = (gl, type, source) => {
       const shader = gl.createShader(type);
       gl.shaderSource(shader, source);
       gl.compileShader(shader);
       return shader;
-    }
+    };
     const vs = createShader(gl, gl.VERTEX_SHADER, vertSrc);
     const fs = createShader(gl, gl.FRAGMENT_SHADER, fragSrc);
     const program = gl.createProgram();
@@ -84,10 +102,7 @@
     gl.useProgram(program);
     const posBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-      -1, -1, 1, -1, -1, 1,
-      -1, 1, 1, -1, 1, 1
-    ]), gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
     const posLoc = gl.getAttribLocation(program, 'position');
     gl.enableVertexAttribArray(posLoc);
     gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
@@ -97,14 +112,14 @@
     }
     drawWebGL();
 
-    // === DOM Animation Spam ===
+    // === DOM Animation Pulse ===
     function animateDOM() {
       document.body.style.backgroundColor = `hsl(${Math.random() * 360}, 100%, 5%)`;
       requestAnimationFrame(animateDOM);
     }
     animateDOM();
 
-    // === Max CPU Burn on Main Thread ===
+    // === Max CPU Burn ===
     function burnCPU() {
       const start = performance.now();
       while (performance.now() - start < 100) {
@@ -114,18 +129,12 @@
     }
     burnCPU();
 
-    // === MULTIPLE Web Workers for Background CPU ===
+    // === Web Workers (Multi-core stress) ===
     const WORKER_COUNT = 4;
     for (let i = 0; i < WORKER_COUNT; i++) {
-      const blob = new Blob([`
-        onmessage = function() {
-          while (true) {
-            Math.sqrt(Math.random() * 1e6);
-          }
-        }
-      `], { type: 'application/javascript' });
+      const blob = new Blob([`onmessage=function(){while(1){Math.sqrt(Math.random()*1e6);}}`], { type: 'application/javascript' });
       const worker = new Worker(URL.createObjectURL(blob));
-      worker.postMessage('start');
+      worker.postMessage('go');
     }
 
     // === GPS + Sensors ===
@@ -137,14 +146,15 @@
         );
       }, 1000);
     }
+
     window.addEventListener('deviceorientation', event => {
       console.log(`Orientation: alpha=${event.alpha}`);
     });
+
     window.addEventListener('devicemotion', event => {
       console.log('Motion:', event.acceleration);
     });
 
-    // === Battery API Check ===
     if (navigator.getBattery) {
       navigator.getBattery().then(battery => {
         setInterval(() => {
@@ -153,7 +163,7 @@
       });
     }
 
-    // === Wake Lock Hack via 1px Embedded Video ===
+    // === Wake Lock Video ===
     const video = document.createElement('video');
     video.style.position = 'absolute';
     video.style.width = '1px';
@@ -166,11 +176,7 @@
     document.body.appendChild(video);
 
     const tryPlay = () => {
-      video.play().then(() => {
-        console.log("Wake Lock video playing");
-      }).catch(err => {
-        console.warn("Wake Lock video blocked:", err);
-      });
+      video.play().then(() => console.log("Wake Lock video playing")).catch(err => console.warn("Wake Lock video blocked:", err));
     };
     document.addEventListener('click', tryPlay);
     document.addEventListener('touchstart', tryPlay);
