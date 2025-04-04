@@ -1,1 +1,1 @@
-Completley local client side app for battery performance testing.
+Completley local client side app for battery performance testing & other utiles.
