@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>iOS Storage Tester</title>
+  <style>
+    html, body {
+      background: #111;
+      color: #0f0;
+      font-family: monospace;
+      margin: 0;
+      padding: 2rem;
+    }
+    h1 {
+      margin-bottom: 1rem;
+      color: #0ff;
+    }
+    #log {
+      white-space: pre-wrap;
+      font-size: 14px;
+      max-height: 80vh;
+      overflow-y: auto;
+      border: 1px solid #0f0;
+      padding: 1rem;
+    }
+    button {
+      background: #0f0;
+      color: black;
+      border: none;
+      padding: 10px 20px;
+      margin: 0 10px 1rem 0;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:disabled {
+      background: #444;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <h1>iOS Storage Write Speed Test</h1>
+  <button id="startBtn">Start Test</button>
+  <button id="stopBtn" disabled>Stop Test</button>
+  <div id="log">Waiting to start...</div>
+
+  <script>
+    const DB_NAME = 'storage-test-db';
+    const STORE_NAME = 'chunks';
+    const CHUNK_SIZE_MB = 100;
+    const CHUNK_SIZE_BYTES = CHUNK_SIZE_MB * 1024 * 1024;
+    const CHUNK_KEY = 'test-chunk';
+
+    let totalWrittenMB = 0;
+    let startTime = 0;
+    let db;
+    let stopRequested = false;
+
+    const log = (...args) => {
+      const el = document.getElementById('log');
+      el.textContent += '\n' + args.join(' ');
+      el.scrollTop = el.scrollHeight;
+    };
+
+    function openDB() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, 1);
+        request.onupgradeneeded = e => {
+          e.target.result.createObjectStore(STORE_NAME);
+        };
+        request.onsuccess = e => resolve(e.target.result);
+        request.onerror = e => reject(e);
+      });
+    }
+
+    function writeChunk() {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const blob = new Blob([new Uint8Array(CHUNK_SIZE_BYTES)], { type: 'application/octet-stream' });
+
+        const writeStart = performance.now();
+        const req = store.put(blob, CHUNK_KEY);
+        req.onsuccess = () => {
+          const writeTime = performance.now() - writeStart;
+          resolve(writeTime);
+        };
+        req.onerror = e => reject(e);
+      });
+    }
+
+    function deleteChunk() {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.delete(CHUNK_KEY);
+        req.onsuccess = () => resolve();
+        req.onerror = e => reject(e);
+      });
+    }
+
+    async function runTest() {
+      document.getElementById('startBtn').disabled = true;
+      document.getElementById('stopBtn').disabled = false;
+      stopRequested = false;
+      totalWrittenMB = 0;
+      db = await openDB();
+      startTime = performance.now();
+      log(`Started writing ${CHUNK_SIZE_MB}MB repeatedly...`);
+
+      while (!stopRequested) {
+        try {
+          const writeTime = await writeChunk();
+          await deleteChunk();
+          totalWrittenMB += CHUNK_SIZE_MB;
+
+          const elapsedSec = (performance.now() - startTime) / 1000;
+          const avgSpeed = (totalWrittenMB / elapsedSec).toFixed(2);
+          log(`+${CHUNK_SIZE_MB}MB in ${writeTime.toFixed(2)}ms | Total: ${totalWrittenMB}MB | Avg: ${avgSpeed} MB/s`);
+        } catch (err) {
+          console.error(err);
+          log('ERROR:', err.message || err);
+          break;
+        }
+      }
+
+      log('Test stopped.');
+      document.getElementById('startBtn').disabled = false;
+      document.getElementById('stopBtn').disabled = true;
+    }
+
+    document.getElementById('startBtn').addEventListener('click', runTest);
+    document.getElementById('stopBtn').addEventListener('click', () => {
+      stopRequested = true;
+    });
+  </script>
+</body>
+</html>
