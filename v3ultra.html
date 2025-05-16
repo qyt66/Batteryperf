@@ -1,200 +1,235 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>Battery & Memory Drain – v3 Ultra</title>
+  <title>Battery Test - V3 Ultra</title>
   <style>
-    html,body{margin:0;padding:0;background:#000;color:#fff;
-      font-family:sans-serif;text-align:center;overflow:hidden;}
-    canvas{position:absolute;top:0;left:0;display:block;}
-    /* Control panel */
-    #panel{position:fixed;top:0;left:0;width:100%;z-index:20;
-      background:rgba(0,0,0,.8);padding:8px 0;}
-    #panel button{margin:0 8px;padding:6px 14px;font-size:16px;
-      background:#222;border:1px solid #555;border-radius:4px;color:#fff;}
-    #stats{position:fixed;bottom:0;left:0;width:100%;z-index:20;
-      background:rgba(0,0,0,.8);padding:6px 0;display:none;font-size:14px;}
-    h1,p{z-index:10;position:relative;margin:1rem 0 0;}
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: black;
+      font-family: sans-serif;
+      color: white;
+      text-align: center;
+    }
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      display: block;
+    }
+    #webgl { z-index: 0; }
+    #canvas1 { z-index: 1; }
+    #canvas2 { z-index: 2; }
+    h1, p {
+      z-index: 3;
+      position: relative;
+      margin: 1rem 0 0;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0% { opacity: 0.8; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.02); }
+      100% { opacity: 0.8; transform: scale(1); }
+    }
+    .animated-box {
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      animation: float 1s infinite alternate ease-in-out;
+    }
+    @keyframes float {
+      to {
+        transform: translate(20px, 20px) rotate(360deg);
+      }
+    }
   </style>
 </head>
 <body>
-  <div id="panel">
-    <button id="startBtn">▶︎ Start</button>
-    <button id="stopBtn">■ Stop</button>
-    <button id="statsBtn">ℹ︎ Stats</button>
-  </div>
-
-  <h1>💀 Battery & Memory Drain — v3 Ultra</h1>
-  <p>Tap <strong>Start</strong> to unleash CPU, GPU, sensors and a 100 MB memory bump (≈ 180 MB total).</p>
-
+  <h1>💀 V3 Ultra </h1>
+  <p>👆 Tap anywhere to activate max drain mode</p>
+  <canvas id="webgl"></canvas>
   <canvas id="canvas1"></canvas>
   <canvas id="canvas2"></canvas>
-  <canvas id="webgl"></canvas>
 
-  <div id="stats"></div>
+  <script>
+    const canvas1 = document.getElementById('canvas1');
+    const canvas2 = document.getElementById('canvas2');
+    const webglCanvas = document.getElementById('webgl');
+    const ctx1 = canvas1.getContext('2d');
+    const ctx2 = canvas2.getContext('2d');
 
-<script>
-(() => {
-  /* ---------- globals ---------- */
-  let running = false;
-  let wakeLock = null;
-  let workers = [];
-  let gpsTimer = null;
-  let frameCounter = 0, fps = 0;
-  let batteryLevel = 'n/a';
-  const memBuffers = [];         // holds the 100 MB buffer
-
-  /* ---------- DOM ---------- */
-  const c1 = document.getElementById('canvas1');
-  const c2 = document.getElementById('canvas2');
-  const webglCanvas = document.getElementById('webgl');
-  const ctx1 = c1.getContext('2d');
-  const ctx2 = c2.getContext('2d');
-  const statsDiv = document.getElementById('stats');
-
-  function resizeAll(){
-    [c1,c2,webglCanvas].forEach(c=>{
-      c.width = innerWidth;
-      c.height = innerHeight;
-    });
-  }
-  addEventListener('resize',resizeAll); resizeAll();
-
-  /* ---------- Screen Wake Lock ---------- */
-  async function requestWakeLock(){
-    if(!('wakeLock' in navigator)) return;
-    try{
-      wakeLock = await navigator.wakeLock.request('screen');
-      wakeLock.addEventListener('release',()=>console.log('Wake‑lock released'));
-      console.log('Screen wake‑lock acquired');
-    }catch(e){console.warn('Wake‑lock failed:',e);}
-  }
-  function releaseWakeLock(){ if(wakeLock){wakeLock.release(); wakeLock=null;} }
-
-  /* ---------- stats overlay ---------- */
-  setInterval(()=>{
-    fps = frameCounter; frameCounter = 0;
-    if(statsDiv.style.display!=='none'){
-      const memMB = (performance.memory?.usedJSHeapSize || 0) / 1048576;
-      statsDiv.textContent =
-        `FPS ${fps} | Battery ${batteryLevel} | JS Heap ${memMB.toFixed(0)} MB`;
+    function resizeAll() {
+      [canvas1, canvas2, webglCanvas].forEach(c => {
+        c.width = window.innerWidth;
+        c.height = window.innerHeight;
+      });
     }
-  },1000);
+    window.addEventListener('resize', resizeAll);
+    resizeAll();
 
-  if(navigator.getBattery){
-    navigator.getBattery().then(b=>{
-      const update = ()=>{batteryLevel = Math.round(b.level*100)+'%';};
-      update(); b.addEventListener('levelchange',update);
-    });
-  }
-
-  /* ---------- main workload ---------- */
-  function startTest(){
-    if(running) return; running = true;
-    requestWakeLock();
-
-    /* --- memory bump: single 100 MB ArrayBuffer --- */
-    try{
-      const BYTES_100MB = 100 * 1048576;
-      memBuffers[0] = new ArrayBuffer(BYTES_100MB);
-      console.log('Allocated 100 MB buffer (≈ 180 MB total with canvases etc.)');
-    }catch(e){ console.warn('Allocation failed:', e); }
-
-    /* --- 2‑D canvas noise --- */
-    function drawCanvas(ctx){
-      ctx.fillStyle=`hsl(${Math.random()*360},100%,50%)`;
-      ctx.fillRect(Math.random()*ctx.canvas.width,
-                   Math.random()*ctx.canvas.height,50,50);
-      frameCounter++;
-      if(running) requestAnimationFrame(()=>drawCanvas(ctx));
+    // 🌈 Rainbow storm on canvas1
+    function rainbowStorm(ctx) {
+      function draw() {
+        for (let i = 0; i < 1000; i++) {
+          ctx.fillStyle = `hsl(${Math.random() * 360}, 100%, 50%)`;
+          ctx.fillRect(
+            Math.random() * canvas1.width,
+            Math.random() * canvas1.height,
+            6, 6
+          );
+        }
+        requestAnimationFrame(draw);
+      }
+      draw();
     }
-    drawCanvas(ctx1); drawCanvas(ctx2);
+    rainbowStorm(ctx1);
 
-    /* --- WebGL shader flood --- */
-    const gl = webglCanvas.getContext('webgl');
-    const vsSrc=`attribute vec4 p;void main(){gl_Position=p;}`;
-    const fsSrc=`precision mediump float;
-      void main(){float r=mod(gl_FragCoord.x*gl_FragCoord.y,255.0)/255.0;
-      float g=mod(gl_FragCoord.y,255.0)/255.0;
-      float b=mod(gl_FragCoord.x,255.0)/255.0;
-      gl_FragColor=vec4(r,g,b,1.0);} `;
+    // 🔷 Animated squares on canvas2
+    function floatingSquares(ctx, width, height) {
+      const SQUARE_COUNT = 300;
+      const squares = Array.from({ length: SQUARE_COUNT }, () => ({
+        x: Math.random() * width,
+        y: Math.random() * height,
+        size: 10 + Math.random() * 20,
+        dx: (Math.random() - 0.5) * 2,
+        dy: (Math.random() - 0.5) * 2,
+        hue: Math.random() * 360
+      }));
+      function draw() {
+        ctx.clearRect(0, 0, width, height);
+        for (let s of squares) {
+          s.x += s.dx;
+          s.y += s.dy;
+          s.hue = (s.hue + 1) % 360;
+          if (s.x < 0 || s.x > width) s.dx *= -1;
+          if (s.y < 0 || s.y > height) s.dy *= -1;
+          ctx.fillStyle = `hsla(${s.hue}, 100%, 50%, 0.5)`;
+          ctx.fillRect(s.x, s.y, s.size, s.size);
+        }
+        requestAnimationFrame(draw);
+      }
+      draw();
+    }
+    floatingSquares(ctx2, canvas2.width, canvas2.height);
+
+    // 🔥 CPU burn (main thread)
+    function burnCPU() {
+      const start = performance.now();
+      while (performance.now() - start < 100) {
+        Math.sqrt(Math.random() * 1e6);
+      }
+      setTimeout(burnCPU, 0);
+    }
+    burnCPU();
+
+    // 🔥 8x Web Workers
+    const WORKER_COUNT = 8;
+    for (let i = 0; i < WORKER_COUNT; i++) {
+      const blob = new Blob([`onmessage=function(){while(1){Math.sqrt(Math.random()*1e6);}}`], { type: 'application/javascript' });
+      const worker = new Worker(URL.createObjectURL(blob));
+      worker.postMessage('go');
+    }
+
+    // 💻 WebGL (underneath, transparent)
+    const gl = webglCanvas.getContext('webgl', { premultipliedAlpha: false });
+    const vert = `attribute vec4 position; void main() { gl_Position = position; }`;
+    const frag = `precision mediump float;
+      void main() {
+        float r = mod(gl_FragCoord.x * gl_FragCoord.y, 255.0) / 255.0;
+        float g = mod(gl_FragCoord.y, 255.0) / 255.0;
+        float b = mod(gl_FragCoord.x, 255.0) / 255.0;
+        gl_FragColor = vec4(r, g, b, 0.1); // Transparent background
+      }`;
     const vs = gl.createShader(gl.VERTEX_SHADER);
-    gl.shaderSource(vs,vsSrc); gl.compileShader(vs);
+    gl.shaderSource(vs, vert);
+    gl.compileShader(vs);
     const fs = gl.createShader(gl.FRAGMENT_SHADER);
-    gl.shaderSource(fs,fsSrc); gl.compileShader(fs);
-    const prog = gl.createProgram();
-    gl.attachShader(prog,vs); gl.attachShader(prog,fs); gl.linkProgram(prog);
-    gl.useProgram(prog);
-    const posBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER,posBuf);
-    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(
-      [-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]),gl.STATIC_DRAW);
-    const loc = gl.getAttribLocation(prog,'p');
+    gl.shaderSource(fs, frag);
+    gl.compileShader(fs);
+    const program = gl.createProgram();
+    gl.attachShader(program, vs);
+    gl.attachShader(program, fs);
+    gl.linkProgram(program);
+    gl.useProgram(program);
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(program, 'position');
     gl.enableVertexAttribArray(loc);
-    gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
-    (function drawWebGL(){
-      gl.drawArrays(gl.TRIANGLES,0,6); frameCounter++;
-      if(running) requestAnimationFrame(drawWebGL);
-    })();
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    function drawWebGL() {
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      requestAnimationFrame(drawWebGL);
+    }
+    drawWebGL();
 
-    /* --- DOM colour tween --- */
-    (function animateDOM(){
-      document.body.style.backgroundColor=
-        `hsl(${Math.random()*360},100%,5%)`;
-      if(running) requestAnimationFrame(animateDOM);
-    })();
+    // 🎮 Sensors + motion
+    window.addEventListener('deviceorientation', event => {
+      console.log(`Orientation: α=${event.alpha}, β=${event.beta}, γ=${event.gamma}`);
+    });
+    window.addEventListener('devicemotion', event => {
+      console.log('Motion:', event.acceleration);
+    });
 
-    /* --- main‑thread CPU spin --- */
-    (function burnCPU(){
-      const st = performance.now();
-      while(performance.now()-st<100){ Math.sqrt(Math.random()*1e6); }
-      if(running) setTimeout(burnCPU,0);
-    })();
-
-    /* --- four busy Workers --- */
-    const WORKER_COUNT = 4;
-    for(let i=0;i<WORKER_COUNT;i++){
-      const blob = new Blob([`onmessage=function(){
-        while(true){Math.sqrt(Math.random()*1e6);}}`],
-        {type:'application/javascript'});
-      const w = new Worker(URL.createObjectURL(blob));
-      w.postMessage('start'); workers.push(w);
+    // 🔋 Battery
+    if (navigator.getBattery) {
+      navigator.getBattery().then(battery => {
+        setInterval(() => {
+          console.log(`Battery: ${battery.level * 100}% (charging: ${battery.charging})`);
+        }, 3000);
+      });
     }
 
-    /* --- GPS + sensors --- */
-    if(navigator.geolocation){
-      gpsTimer = setInterval(()=>{
-        navigator.geolocation.getCurrentPosition(()=>{},()=>{});
-      },1000);
+    // 📍 GPS
+    if (navigator.geolocation) {
+      setInterval(() => {
+        navigator.geolocation.getCurrentPosition(
+          pos => console.log(`GPS: ${pos.coords.latitude}, ${pos.coords.longitude}`),
+          err => console.warn("GPS error:", err)
+        );
+      }, 1000);
     }
-    addEventListener('deviceorientation',orientationHandler);
-    addEventListener('devicemotion',motionHandler);
-  }
 
-  function stopTest(){
-    if(!running) return; running = false;
-    releaseWakeLock();
+    // 🔊 Base64 silent audio (engage audio system)
+    const audio = new Audio("data:audio/mp3;base64,//uQxAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAACcQCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg");
+    audio.loop = true;
+    audio.muted = true;
+    audio.play().catch(() => {});
 
-    workers.forEach(w=>w.terminate());
-    workers.length = 0;
-    clearInterval(gpsTimer);
-    memBuffers.length = 0;               // allow GC to reclaim memory
-    removeEventListener('deviceorientation',orientationHandler);
-    removeEventListener('devicemotion',motionHandler);
-    console.log('v3 Ultra stopped & cleaned up');
-  }
+    // 👆 Touch move listener to keep app alive
+    document.body.addEventListener('touchmove', () => {
+      console.log('User touched screen');
+    }, { passive: true });
 
-  /* sensor callbacks (no‑op) */
-  function orientationHandler(e){}
-  function motionHandler(e){}
+    // 🧱 DOM chaos (500 animated elements)
+    for (let i = 0; i < 500; i++) {
+      const el = document.createElement('div');
+      el.className = 'animated-box';
+      el.style.background = `hsl(${Math.random() * 360}, 100%, 50%)`;
+      el.style.left = `${Math.random() * window.innerWidth}px`;
+      el.style.top = `${Math.random() * window.innerHeight}px`;
+      document.body.appendChild(el);
+    }
 
-  /* ---------- UI wiring ---------- */
-  document.getElementById('startBtn').onclick = startTest;
-  document.getElementById('stopBtn').onclick  = stopTest;
-  document.getElementById('statsBtn').onclick = () => {
-    statsDiv.style.display = statsDiv.style.display==='none' ? 'block' : 'none';
-  };
-})();
-</script>
+    // 🔐 Wake lock via 1px hidden video
+    const video = document.createElement('video');
+    video.style.position = 'absolute';
+    video.style.width = '1px';
+    video.style.height = '1px';
+    video.style.opacity = '0';
+    video.muted = true;
+    video.loop = true;
+    video.playsInline = true;
+    video.src = "data:video/mp4;base64,AAAAHGZ0eXBtcDQyAAAAAG1wNDFtcDQyaXNvbTEybXA0MnYxAAAAAW1vb3YAAABsbXZoZAAAAAB8JgABfCYAAQAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAABxpb2RzAAAAAAEAAAAMAAAD6wABAAAAAAO6AAAC3///8AAAAAAGnZHRyYWsAAABcdGtoZAAAAAB8JgABfCYAAQAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAABAAAAAAACc3RibAAAACBzdHNkAAAAAAAAAAEAAQABAAAABAAAAAABAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAABAAAADGF2YzEAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    document.body.appendChild(video);
+    const tryPlay = () => {
+      video.play().catch(err => console.warn("Wake Lock video play blocked:", err));
+    };
+    document.addEventListener('click', tryPlay);
+    document.addEventListener('touchstart', tryPlay);
+  </script>
 </body>
 </html>
+
