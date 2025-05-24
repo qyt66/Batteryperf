@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>iPhone 16 Pro Max Stress Test</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  html,body{margin:0;padding:0;overflow:hidden;background:#000;color:#0f0;font-family:system-ui}
+  #controls{position:fixed;top:10px;left:10px;z-index:10}
+  button{padding:.5em 1em;margin-right:.5em;font-size:1rem}
+  #stats{position:fixed;top:10px;right:10px;background:rgba(0,0,0,.6);color:#0f0;padding:.4em .6em;font-size:.8rem}
+  canvas{display:block}
+</style>
+</head>
+<body>
+<div id="controls">
+  <button id="start">▶︎ Start</button>
+  <button id="stop" disabled>■ Stop</button>
+</div>
+<div id="stats">Idle</div>
+<canvas id="c"></canvas>
+
+<!-- GPU.js CDN – WebGL compute kernel -->
+<script type="module">
+import {GPU} from 'https://cdn.jsdelivr.net/npm/gpu.js@2.11.0/dist/gpu-browser.min.js';
+
+const cvs = document.getElementById('c');
+const ctx = cvs.getContext('2d');
+let W,H; resize(); window.addEventListener('resize',resize);
+
+const startBtn=document.getElementById('start');
+const stopBtn =document.getElementById('stop');
+const stats   =document.getElementById('stats');
+
+let running=false,cpuWorkers=[],gpuTimer=null,memTimer=null,gpsWatch=null;
+let fps=0,frames=0,last=0,memoryHogs=[];
+const gpu=new GPU();
+
+startBtn.onclick = start;
+stopBtn .onclick = stop;
+
+function start(){
+  if(running) return; running=true;
+  startBtn.disabled=true; stopBtn.disabled=false;
+  spinCpu(); burnGpu(); eatMem(); pollGps();
+  frames=0; last=performance.now();
+  stats.textContent='Running…';
+  requestAnimationFrame(loop);
+}
+
+function stop(){
+  running=false;
+  cpuWorkers.forEach(w=>w.terminate()); cpuWorkers=[];
+  clearInterval(gpuTimer); clearInterval(memTimer);
+  gpu.destroy(); memoryHogs=[];
+  if(gpsWatch) navigator.geolocation.clearWatch(gpsWatch);
+  startBtn.disabled=false; stopBtn.disabled=true;
+  stats.textContent='Stopped';
+}
+
+/* ---------- stress routines ---------- */
+
+function spinCpu(){
+  const cores = navigator.hardwareConcurrency||4;
+  for(let i=0;i<cores;i++){
+    const blob = new Blob([`
+      self.onmessage=e=>{
+        const lim=e.data;
+        function prime(n){if(n<2)return false;for(let i=2;i*i<=n;i++) if(n%i===0) return false;return true}
+        while(true){let c=0;for(let j=2;j<lim;j++) if(prime(j)) c++;}
+      };`],{type:'text/javascript'});
+    const worker = new Worker(URL.createObjectURL(blob));
+    worker.postMessage(1e7);
+    cpuWorkers.push(worker);
+  }
+}
+
+function burnGpu(){
+  const SIZE = 512;
+  const arr  = Array.from({length:SIZE},_=>Array(SIZE).fill(Math.random()));
+  const kern = gpu.createKernel(function(a,b){return a[this.thread.y][this.thread.x]+b[this.thread.y][this.thread.x];})
+                  .setOutput([SIZE,SIZE]);
+  gpuTimer=setInterval(()=>kern(arr,arr),0);
+}
+
+function eatMem(){
+  memTimer=setInterval(()=>{
+    memoryHogs.push(new Float64Array(2**18));   // ~1 MB
+    if(memoryHogs.length>256) memoryHogs.shift();
+  },500);
+}
+
+function pollGps(){
+  if(!navigator.geolocation) return;
+  gpsWatch = navigator.geolocation.watchPosition(p=>{
+      stats.textContent=\`Running | \${fps.toFixed(0)} FPS | ${'${p.coords.latitude.toFixed(4)}'} , ${'${p.coords.longitude.toFixed(4)}'}\`;
+    },err=>console.warn(err),{enableHighAccuracy:true,timeout:10000});
+}
+
+/* ---------- visuals & FPS ---------- */
+
+function loop(t){
+  frames++;
+  if(t-last>1000){
+    fps = frames*1000/(t-last);
+    frames=0; last=t;
+    if(running && !stats.textContent.includes('FPS'))
+      stats.textContent=\`Running | \${fps.toFixed(0)} FPS\`;
+  }
+  draw(t);
+  if(running) requestAnimationFrame(loop);
+}
+
+function draw(t){
+  const stripe=20;
+  for(let x=0;x<W;x+=stripe){
+    ctx.fillStyle=\`hsl(\${(x+t/10)%360},100%,50%)\`;
+    ctx.fillRect(x,0,stripe,H);
+  }
+  for(let y=0;y<H;y+=stripe){
+    ctx.fillStyle=\`hsl(\${(y+t/7)%360},100%,50%)\`;
+    ctx.fillRect(0,y,W,stripe);
+  }
+}
+
+function resize(){W=cvs.width=innerWidth;H=cvs.height=innerHeight;}
+</script>
+</body>
+</html>
