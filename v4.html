@@ -2,128 +2,104 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>iPhone 16 Pro Max Stress Test</title>
+<title>iPhone 16 Pro Max Stress Test – v1.1</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-  html,body{margin:0;padding:0;overflow:hidden;background:#000;color:#0f0;font-family:system-ui}
+  html,body{margin:0;padding:0;overflow:hidden;background:#000;font-family:system-ui;color:#0f0}
   #controls{position:fixed;top:10px;left:10px;z-index:10}
-  button{padding:.5em 1em;margin-right:.5em;font-size:1rem}
-  #stats{position:fixed;top:10px;right:10px;background:rgba(0,0,0,.6);color:#0f0;padding:.4em .6em;font-size:.8rem}
+  button{padding:.6em 1.2em;margin-right:.6em;font-size:1rem}
+  #stats{position:fixed;top:10px;right:10px;background:rgba(0,0,0,.6);padding:.4em .6em;font-size:.8rem}
   canvas{display:block}
 </style>
 </head>
 <body>
 <div id="controls">
   <button id="start">▶︎ Start</button>
-  <button id="stop" disabled>■ Stop</button>
+  <button id="stop"  disabled>■ Stop</button>
 </div>
 <div id="stats">Idle</div>
 <canvas id="c"></canvas>
 
-<!-- GPU.js CDN – WebGL compute kernel -->
-<script type="module">
-import {GPU} from 'https://cdn.jsdelivr.net/npm/gpu.js@2.11.0/dist/gpu-browser.min.js';
+<!-- 1️⃣: classic script, CORS-enabled -->
+<script src="https://cdn.jsdelivr.net/npm/gpu.js@2.11.0/dist/gpu-browser.min.js"
+        crossorigin="anonymous"></script>
 
-const cvs = document.getElementById('c');
-const ctx = cvs.getContext('2d');
+<script>
+(() => {          // IIFE keeps globals clean
+/* ---------- DOM ---------- */
+const cvs   = document.getElementById('c');
+const ctx   = cvs.getContext('2d');
+const start = document.getElementById('start');
+const stop  = document.getElementById('stop');
+const stats = document.getElementById('stats');
 let W,H; resize(); window.addEventListener('resize',resize);
 
-const startBtn=document.getElementById('start');
-const stopBtn =document.getElementById('stop');
-const stats   =document.getElementById('stats');
+/* ---------- state ---------- */
+let running=false,fps=0,frames=0,last=0;
+let cpuWorkers=[],gpuTimer=null,memTimer=null,gpsWatch=null,memoryHogs=[];
+let gpu;
 
-let running=false,cpuWorkers=[],gpuTimer=null,memTimer=null,gpsWatch=null;
-let fps=0,frames=0,last=0,memoryHogs=[];
-const gpu=new GPU();
-
-startBtn.onclick = start;
-stopBtn .onclick = stop;
-
-function start(){
-  if(running) return; running=true;
-  startBtn.disabled=true; stopBtn.disabled=false;
-  spinCpu(); burnGpu(); eatMem(); pollGps();
-  frames=0; last=performance.now();
+/* ---------- buttons ---------- */
+start.addEventListener('click',() => {
+  if(running) return;
+  start.disabled=true; stop.disabled=false; running=true;
   stats.textContent='Running…';
+  try      { spinCpu(); }  catch(e){report('CPU',e);}
+  try      { burnGpu(); }  catch(e){report('GPU',e);}
+  try      { eatMem(); }   catch(e){report('RAM',e);}
+  try      { pollGps(); }  catch(e){report('GPS',e);}
+  frames=0; last=performance.now();
   requestAnimationFrame(loop);
-}
+});
 
-function stop(){
-  running=false;
-  cpuWorkers.forEach(w=>w.terminate()); cpuWorkers=[];
-  clearInterval(gpuTimer); clearInterval(memTimer);
-  gpu.destroy(); memoryHogs=[];
-  if(gpsWatch) navigator.geolocation.clearWatch(gpsWatch);
-  startBtn.disabled=false; stopBtn.disabled=true;
-  stats.textContent='Stopped';
-}
+stop.addEventListener('click',hardStop);
 
-/* ---------- stress routines ---------- */
-
+/* ---------- stress functions ---------- */
 function spinCpu(){
-  const cores = navigator.hardwareConcurrency||4;
+  const cores=navigator.hardwareConcurrency||4;
   for(let i=0;i<cores;i++){
-    const blob = new Blob([`
-      self.onmessage=e=>{
-        const lim=e.data;
-        function prime(n){if(n<2)return false;for(let i=2;i*i<=n;i++) if(n%i===0) return false;return true}
-        while(true){let c=0;for(let j=2;j<lim;j++) if(prime(j)) c++;}
-      };`],{type:'text/javascript'});
-    const worker = new Worker(URL.createObjectURL(blob));
-    worker.postMessage(1e7);
-    cpuWorkers.push(worker);
+    const blob=new Blob([`onmessage=e=>{const n=e.data;function p(x){if(x<2)return 0;for(let i=2;i*i<=x;i++)if(x%i===0)return 0;return 1}while(true){for(let j=2;j<n;j++)p(j);}}`],{type:'text/javascript'});
+    const w=new Worker(URL.createObjectURL(blob)); w.postMessage(1e6); cpuWorkers.push(w);
   }
 }
-
 function burnGpu(){
-  const SIZE = 512;
-  const arr  = Array.from({length:SIZE},_=>Array(SIZE).fill(Math.random()));
-  const kern = gpu.createKernel(function(a,b){return a[this.thread.y][this.thread.x]+b[this.thread.y][this.thread.x];})
-                  .setOutput([SIZE,SIZE]);
+  if(typeof GPU==='undefined') throw 'GPU.js not loaded';
+  gpu=new GPU(); const SZ=512;
+  const arr=[...Array(SZ)].map(()=>new Float32Array(SZ).fill(Math.random()));
+  const kern=gpu.createKernel(function(a,b){return a[this.thread.y][this.thread.x]+b[this.thread.y][this.thread.x];}).setOutput([SZ,SZ]);
   gpuTimer=setInterval(()=>kern(arr,arr),0);
 }
-
-function eatMem(){
-  memTimer=setInterval(()=>{
-    memoryHogs.push(new Float64Array(2**18));   // ~1 MB
-    if(memoryHogs.length>256) memoryHogs.shift();
-  },500);
-}
-
+function eatMem(){memTimer=setInterval(()=>{memoryHogs.push(new Float64Array(2**18));if(memoryHogs.length>256)memoryHogs.shift();},500);}
 function pollGps(){
-  if(!navigator.geolocation) return;
-  gpsWatch = navigator.geolocation.watchPosition(p=>{
-      stats.textContent=\`Running | \${fps.toFixed(0)} FPS | ${'${p.coords.latitude.toFixed(4)}'} , ${'${p.coords.longitude.toFixed(4)}'}\`;
-    },err=>console.warn(err),{enableHighAccuracy:true,timeout:10000});
+  if(!navigator.geolocation) throw 'Geolocation API unavailable';
+  gpsWatch=navigator.geolocation.watchPosition(
+    p=>updateStats(`Running | ${fps.toFixed(0)} FPS | ${p.coords.latitude.toFixed(4)}, ${p.coords.longitude.toFixed(4)}`),
+    err=>console.warn(err),{enableHighAccuracy:true,timeout:10000});
 }
 
-/* ---------- visuals & FPS ---------- */
-
+/* ---------- visuals ---------- */
 function loop(t){
-  frames++;
-  if(t-last>1000){
-    fps = frames*1000/(t-last);
-    frames=0; last=t;
-    if(running && !stats.textContent.includes('FPS'))
-      stats.textContent=\`Running | \${fps.toFixed(0)} FPS\`;
-  }
-  draw(t);
-  if(running) requestAnimationFrame(loop);
+  frames++; if(t-last>1000){fps=frames*1000/(t-last);frames=0;last=t;updateStats(`Running | ${fps.toFixed(0)} FPS`);}
+  draw(t); if(running) requestAnimationFrame(loop);
 }
-
 function draw(t){
   const stripe=20;
-  for(let x=0;x<W;x+=stripe){
-    ctx.fillStyle=\`hsl(\${(x+t/10)%360},100%,50%)\`;
-    ctx.fillRect(x,0,stripe,H);
-  }
-  for(let y=0;y<H;y+=stripe){
-    ctx.fillStyle=\`hsl(\${(y+t/7)%360},100%,50%)\`;
-    ctx.fillRect(0,y,W,stripe);
-  }
+  for(let x=0;x<W;x+=stripe){ctx.fillStyle=`hsl(${(x+t/10)%360},100%,50%)`;ctx.fillRect(x,0,stripe,H);}
+  for(let y=0;y<H;y+=stripe){ctx.fillStyle=`hsl(${(y+t/7)%360},100%,50%)`;ctx.fillRect(0,y,W,stripe);}
 }
 
+/* ---------- helpers ---------- */
 function resize(){W=cvs.width=innerWidth;H=cvs.height=innerHeight;}
+function updateStats(msg){if(!stats.textContent.startsWith('ERR')) stats.textContent=msg;}
+function report(tag,err){console.error(tag,err);stats.textContent=`ERR in ${tag}`;}
+function hardStop(){
+  running=false; start.disabled=false; stop.disabled=true;
+  cpuWorkers.forEach(w=>w.terminate()); cpuWorkers=[];
+  clearInterval(gpuTimer); clearInterval(memTimer); gpu?.destroy(); memoryHogs=[];
+  if(gpsWatch) navigator.geolocation.clearWatch(gpsWatch); gpsWatch=null;
+  stats.textContent='Stopped';
+}
+})(); /* IIFE end */
 </script>
 </body>
 </html>
