@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iOS Ultimate Stress Test</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #111; color: #0f0; font-family: monospace; }
+        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+        #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; background: rgba(0,0,0,0.3); }
+        button { pointer-events: auto; padding: 15px 30px; font-size: 20px; background: #c00; color: white; border: none; border-radius: 8px; margin-top: 20px; cursor: pointer; font-weight: bold; }
+        button:active { background: #f00; }
+        #stats { margin-bottom: 20px; font-size: 16px; text-shadow: 1px 1px 2px black; background: rgba(0,0,0,0.7); padding: 10px; border-radius: 8px; }
+        h1 { text-shadow: 2px 2px 0 #000; margin: 5px; }
+    </style>
+</head>
+<body>
+
+    <canvas id="glCanvas"></canvas>
+
+    <div id="ui">
+        <h1>iOS Stress Test</h1>
+        <div id="stats">
+            GPU: Idle<br>
+            CPU Threads: 0 Active<br>
+            GPS: Idle<br>
+            FPS: 0
+        </div>
+        <button id="toggleBtn" onclick="toggleStress()">START STRESS TEST</button>
+    </div>
+
+<script>
+    let isRunning = false;
+    let cpuWorkers = [];
+    let gpsWatchId = null;
+    let animationId = null;
+    const statsEl = document.getElementById('stats');
+    const btn = document.getElementById('toggleBtn');
+
+    // --- GPU STRESS (WebGL Raymarching) ---
+    const canvas = document.getElementById("glCanvas");
+    const gl = canvas.getContext("webgl");
+
+    // Resize canvas to match display density (Retina screens = High GPU Load)
+    function resize() {
+        canvas.width = window.innerWidth * window.devicePixelRatio;
+        canvas.height = window.innerHeight * window.devicePixelRatio;
+        gl.viewport(0, 0, canvas.width, canvas.height);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // Vertex Shader (Simple pass-through)
+    const vsSource = `
+        attribute vec4 position;
+        void main() { gl_Position = position; }
+    `;
+
+    // Fragment Shader (Heavy Raymarching Math)
+    // This forces the GPU to calculate complex 3D geometry for every single pixel
+    const fsSource = `
+        precision mediump float;
+        uniform float time;
+        uniform vec2 resolution;
+
+        // Rotation matrix
+        mat2 rot(float a) { return mat2(cos(a), -sin(a), sin(a), cos(a)); }
+
+        // Distance function for object (Mandelbulb-ish complexity)
+        float map(vec3 p) {
+            p.xz *= rot(time * 0.3);
+            p.xy *= rot(time * 0.2);
+            vec3 q = p;
+            // Repeat space to fill screen
+            p = mod(p, 4.0) - 2.0;
+            float d = length(p) - 1.0; 
+            // Add noise
+            d += sin(p.x*10.0 + time)*0.05;
+            d += cos(p.y*10.0)*0.05;
+            return d;
+        }
+
+        void main() {
+            vec2 uv = (gl_FragCoord.xy * 2.0 - resolution.xy) / resolution.y;
+            vec3 ro = vec3(0.0, 0.0, -3.0 + time); // Ray origin (moving)
+            vec3 rd = normalize(vec3(uv, 1.0));    // Ray direction
+
+            float t = 0.0;
+            for(int i = 0; i < 64; i++) { // High iteration count for stress
+                vec3 p = ro + rd * t;
+                float d = map(p);
+                t += d * 0.5; // Slow march to force calculations
+                if(t > 20.0 || d < 0.01) break;
+            }
+
+            vec3 col = vec3(t * 0.1); // Color based on depth
+            col.r += sin(time);       // Dynamic color
+            gl_FragColor = vec4(col, 1.0);
+        }
+    `;
+
+    function createShader(gl, type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            console.error(gl.getShaderInfoLog(shader));
+            gl.deleteShader(shader);
+            return null;
+        }
+        return shader;
+    }
+
+    const program = gl.createProgram();
+    gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+    gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+    gl.linkProgram(program);
+    gl.useProgram(program);
+
+    const positionLocation = gl.getAttribLocation(program, "position");
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(positionLocation);
+    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+    const timeLocation = gl.getUniformLocation(program, "time");
+    const resolutionLocation = gl.getUniformLocation(program, "resolution");
+
+    // --- CPU STRESS (Web Workers) ---
+    // This creates a blob of code that runs heavy math in the background
+    const workerCode = `
+        self.onmessage = function() {
+            while(true) {
+                // Heavy floating point math
+                let x = 0; 
+                for(let i=0; i<10000; i++) {
+                    x += Math.sqrt(Math.random() * Math.random()) + Math.sin(i) * Math.tan(i);
+                }
+            }
+        };
+    `;
+    const blob = new Blob([workerCode], { type: 'application/javascript' });
+    const workerUrl = URL.createObjectURL(blob);
+
+    function startCpu() {
+        // Use navigator.hardwareConcurrency to match physical cores
+        const threads = navigator.hardwareConcurrency || 4; 
+        for (let i = 0; i < threads; i++) {
+            const w = new Worker(workerUrl);
+            w.postMessage("start");
+            cpuWorkers.push(w);
+        }
+        return threads;
+    }
+
+    function stopCpu() {
+        cpuWorkers.forEach(w => w.terminate());
+        cpuWorkers = [];
+    }
+
+    // --- MAIN LOOP ---
+    let frameCount = 0;
+    let lastTime = performance.now();
+    let fps = 0;
+
+    function render(now) {
+        if (!isRunning) return;
+
+        // Update GPU
+        gl.uniform1f(timeLocation, now * 0.001);
+        gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        // Calculate FPS
+        frameCount++;
+        if (now - lastTime >= 1000) {
+            fps = frameCount;
+            frameCount = 0;
+            lastTime = now;
+            updateStats();
+        }
+
+        animationId = requestAnimationFrame(render);
+    }
+
+    function updateStats(lat = "-", lon = "-") {
+        statsEl.innerHTML = `
+            GPU: Raymarching Shader Active<br>
+            CPU: ${cpuWorkers.length} Cores @ 100%<br>
+            GPS: ${lat !== "-" ? "Tracking Active" : "Searching..."}<br>
+            FPS: ${fps}
+        `;
+    }
+
+    function toggleStress() {
+        if (isRunning) {
+            // STOP
+            isRunning = false;
+            stopCpu();
+            if (gpsWatchId) navigator.geolocation.clearWatch(gpsWatchId);
+            cancelAnimationFrame(animationId);
+            btn.innerText = "START STRESS TEST";
+            btn.style.background = "#c00";
+            statsEl.innerHTML = "Systems Idle";
+        } else {
+            // START
+            isRunning = true;
+            btn.innerText = "STOP TEST";
+            btn.style.background = "#333";
+            
+            // 1. Start GPU
+            render(performance.now());
+
+            // 2. Start CPU
+            startCpu();
+
+            // 3. Start GPS
+            if ("geolocation" in navigator) {
+                gpsWatchId = navigator.geolocation.watchPosition(
+                    (pos) => { updateStats(pos.coords.latitude.toFixed(2), pos.coords.longitude.toFixed(2)); },
+                    (err) => { console.log("GPS Error"); },
+                    { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
+                );
+            }
+
+            updateStats();
+        }
+    }
+</script>
+</body>
+</html>
