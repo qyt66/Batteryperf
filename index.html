@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ZenBench Pro | A18 Stress Test</title>
+    <style>
+        :root {
+            --font-main: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+            --glass: rgba(20, 20, 20, 0.6);
+            --border: rgba(255, 255, 255, 0.15);
+            --accent: #0a84ff;
+            --danger: #ff453a;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+        body {
+            font-family: var(--font-main);
+            background: #000;
+            color: #fff;
+            overflow-x: hidden;
+            /* Create enough height for 5 images scrolling */
+            height: 500vh; 
+        }
+
+        /* --- VISUALS --- */
+        .bg-container {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            z-index: -10;
+        }
+
+        .bg-layer {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background-size: cover;
+            background-position: center;
+            opacity: 0;
+            transition: opacity 0.3s ease-out;
+            will-change: opacity;
+        }
+
+        /* High-Res Nature Images */
+        .layer-0 { background-image: url('https://images.unsplash.com/photo-1472214103451-9374bd1c798e?q=80&w=2000&auto=format&fit=crop'); z-index: 1; opacity: 1; } /* Valley */
+        .layer-1 { background-image: url('https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=2000&auto=format&fit=crop'); z-index: 2; } /* Ocean */
+        .layer-2 { background-image: url('https://images.unsplash.com/photo-1519681393784-d120267933ba?q=80&w=2000&auto=format&fit=crop'); z-index: 3; } /* Mountains */
+        .layer-3 { background-image: url('https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?q=80&w=2000&auto=format&fit=crop'); z-index: 4; } /* Forest */
+        .layer-4 { background-image: url('https://images.unsplash.com/photo-1531366936337-7c912a4589a7?q=80&w=2000&auto=format&fit=crop'); z-index: 5; } /* Aurora */
+
+        #canvas-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            z-index: -5;
+            pointer-events: none;
+            mix-blend-mode: screen; /* Blends 3D cubes nicely with backgrounds */
+            opacity: 0.6;
+        }
+
+        /* --- UI --- */
+        .header {
+            position: fixed;
+            top: 0; width: 100%;
+            padding: 20px;
+            text-align: center;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.9), transparent);
+            z-index: 100;
+        }
+        
+        .header h1 { font-size: 1.1rem; font-weight: 600; letter-spacing: -0.5px; }
+        .header p { font-size: 0.8rem; opacity: 0.7; margin-top: 4px; }
+
+        .hud {
+            position: fixed;
+            bottom: 20px; left: 20px; right: 20px;
+            background: var(--glass);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 20px;
+            z-index: 100;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        .stats {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+
+        .stat-box { text-align: center; width: 33%; }
+        .stat-num { display: block; font-size: 1.3rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+        .stat-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; opacity: 0.6; margin-top: 5px; }
+
+        button {
+            width: 100%;
+            padding: 16px;
+            border-radius: 16px;
+            border: none;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.1s, background 0.2s;
+        }
+        
+        button:active { transform: scale(0.97); }
+
+        .btn-start { background: #fff; color: #000; }
+        .btn-stop { background: rgba(255, 69, 58, 0.2); color: #ff453a; border: 1px solid #ff453a; display: none; }
+
+        /* Scroll Indicator */
+        .scroll-pill {
+            position: fixed;
+            right: 10px; top: 50%;
+            transform: translateY(-50%);
+            height: 100px; width: 4px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 2px;
+            z-index: 50;
+        }
+        .scroll-progress {
+            width: 100%; height: 0%;
+            background: #fff;
+            border-radius: 2px;
+            transition: height 0.1s;
+        }
+
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <div class="bg-container">
+        <div class="bg-layer layer-0"></div>
+        <div class="bg-layer layer-1"></div>
+        <div class="bg-layer layer-2"></div>
+        <div class="bg-layer layer-3"></div>
+        <div class="bg-layer layer-4"></div>
+    </div>
+
+    <div id="canvas-overlay"></div>
+
+    <div class="header">
+        <h1>ZenBench Pro</h1>
+        <p>A18 / A18 Pro Stress Test</p>
+    </div>
+
+    <div class="scroll-pill"><div class="scroll-progress" id="progressBar"></div></div>
+
+    <div class="hud">
+        <div class="stats">
+            <div class="stat-box">
+                <span class="stat-num" id="cpu-val">0</span>
+                <span class="stat-label">Cores</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-num" id="gpu-val">0</span>
+                <span class="stat-label">Objects</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-num" id="mem-val">0</span>
+                <span class="stat-label">MB RAM</span>
+            </div>
+        </div>
+        <button class="btn-start" onclick="toggleStress(true)">Begin Stress Test</button>
+        <button class="btn-stop" onclick="toggleStress(false)">Stop & Cooldown</button>
+    </div>
+
+<script>
+    // --- 1. ADVANCED AUDIO (Brown Noise Generator) ---
+    // Simulates a waterfall/heavy wind. Much more soothing than sine waves.
+    const AudioSystem = {
+        ctx: null,
+        node: null,
+        gain: null,
+        
+        init() {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            this.ctx = new AudioContext();
+            
+            // Create buffer for Brown Noise (1/f^2 noise)
+            const bufferSize = 2 * this.ctx.sampleRate;
+            const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+            const output = buffer.getChannelData(0);
+            
+            let lastOut = 0;
+            for (let i = 0; i < bufferSize; i++) {
+                const white = Math.random() * 2 - 1;
+                output[i] = (lastOut + (0.02 * white)) / 1.02;
+                lastOut = output[i];
+                output[i] *= 3.5; // Gain compensation
+            }
+
+            this.node = this.ctx.createBufferSource();
+            this.node.buffer = buffer;
+            this.node.loop = true;
+            
+            // Lowpass filter to make it sound like deep ocean/wind
+            const filter = this.ctx.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.value = 400; // Deep rumble
+
+            this.gain = this.ctx.createGain();
+            this.gain.gain.value = 0; // Start silent
+
+            this.node.connect(filter);
+            filter.connect(this.gain);
+            this.gain.connect(this.ctx.destination);
+            this.node.start(0);
+        },
+
+        fadeIn() {
+            if (!this.ctx) this.init();
+            this.ctx.resume();
+            this.gain.gain.setTargetAtTime(1.0, this.ctx.currentTime, 2); // Fade to full in 2s
+        },
+
+        fadeOut() {
+            if(this.gain) {
+                this.gain.gain.setTargetAtTime(0, this.ctx.currentTime, 1);
+            }
+        }
+    };
+
+    // --- 2. SCROLL & PARALLAX LOGIC ---
+    const layers = document.querySelectorAll('.bg-layer');
+    const progressBar = document.getElementById('progressBar');
+    
+    window.addEventListener('scroll', () => {
+        const scrollTop = window.scrollY;
+        const maxScroll = document.body.scrollHeight - window.innerHeight;
+        const scrollFraction = scrollTop / maxScroll;
+        
+        // Update visual progress bar
+        progressBar.style.height = `${scrollFraction * 100}%`;
+
+        // Calculate which layer should be visible
+        // We have 5 layers (index 0 to 4).
+        const totalLayers = layers.length;
+        const indexFloat = scrollFraction * (totalLayers - 1);
+        const indexCurrent = Math.floor(indexFloat);
+        const indexNext = indexCurrent + 1;
+        const fade = indexFloat - indexCurrent;
+
+        layers.forEach((layer, i) => {
+            if (i === indexCurrent) {
+                layer.style.opacity = 1 - fade;
+            } else if (i === indexNext) {
+                layer.style.opacity = fade;
+            } else {
+                layer.style.opacity = 0;
+            }
+        });
+        
+        // Add subtle rotation to 3D scene based on scroll
+        if(scene) scene.rotation.y = scrollTop * 0.0005;
+        if(scene) scene.rotation.z = scrollTop * 0.0002;
+    });
+
+    // --- 3. 3D GPU STRESS (Three.js) ---
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio); // Important for Retina/High-DPI stress
+    document.getElementById('canvas-overlay').appendChild(renderer.domElement);
+
+    // Create instanced mesh for high performance rendering of many objects
+    const geometry = new THREE.IcosahedronGeometry(0.3, 0);
+    const material = new THREE.MeshNormalMaterial({ wireframe: true });
+    
+    const count = 3000; // Target object count
+    const mesh = new THREE.InstancedMesh(geometry, material, count);
+    
+    // Position randomly
+    const dummy = new THREE.Object3D();
+    for(let i=0; i<count; i++) {
+        dummy.position.set(
+            (Math.random() - 0.5) * 40,
+            (Math.random() - 0.5) * 40,
+            (Math.random() - 0.5) * 20
+        );
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+    }
+    scene.add(mesh);
+    camera.position.z = 10;
+
+    function animateGPU() {
+        requestAnimationFrame(animateGPU);
+        // Rotate the whole cluster
+        mesh.rotation.x += 0.001;
+        mesh.rotation.y += 0.002;
+        renderer.render(scene, camera);
+    }
+    animateGPU();
+
+    // Resize handler
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // --- 4. SYSTEM STRESS LOGIC ---
+    let workers = [];
+    let memoryArray = [];
+    let isStressing = false;
+    let memInterval;
+
+    const workerBlob = new Blob([`
+        self.onmessage = function() {
+            // Infinite calculation loop
+            setInterval(() => {
+                let r = 0;
+                for(let i=0; i<50000; i++) {
+                    r += Math.sqrt(i) * Math.random();
+                }
+            }, 10);
+        }
+    `], { type: "text/javascript" });
+    const workerURL = URL.createObjectURL(workerBlob);
+
+    function toggleStress(active) {
+        const btnStart = document.querySelector('.btn-start');
+        const btnStop = document.querySelector('.btn-stop');
+        
+        if (active) {
+            isStressing = true;
+            btnStart.style.display = 'none';
+            btnStop.style.display = 'block';
+            AudioSystem.fadeIn();
+            
+            // --- CPU START ---
+            const threads = navigator.hardwareConcurrency || 6;
+            document.getElementById('cpu-val').innerText = threads;
+            for(let i=0; i<threads; i++) {
+                const w = new Worker(workerURL);
+                w.postMessage("start");
+                workers.push(w);
+            }
+
+            // --- GPU RAMP UP ---
+            document.getElementById('gpu-val').innerText = "3000+";
+            // We increase rotation speed for visual feedback of "Stress"
+            mesh.rotation.x += 0.5;
+
+            // --- MEMORY START ---
+            memInterval = setInterval(() => {
+                try {
+                    // Allocating 50MB chunks
+                    const chunk = new Float32Array(12.5 * 1024 * 1024);
+                    // Fill to prevent optimization
+                    for(let k=0; k<chunk.length; k+=100) chunk[k] = Math.random();
+                    memoryArray.push(chunk);
+                    
+                    const mb = Math.round(memoryArray.length * 50);
+                    document.getElementById('mem-val').innerText = mb;
+                    
+                    // Cap at ~1.5GB to prevent page crash on iOS
+                    if(mb > 1500) clearInterval(memInterval);
+                } catch(e) {
+                    clearInterval(memInterval);
+                }
+            }, 1000);
+
+        } else {
+            isStressing = false;
+            btnStart.style.display = 'block';
+            btnStop.style.display = 'none';
+            AudioSystem.fadeOut();
+
+            // --- CPU STOP ---
+            workers.forEach(w => w.terminate());
+            workers = [];
+            document.getElementById('cpu-val').innerText = "0";
+
+            // --- GPU RELAX ---
+            document.getElementById('gpu-val').innerText = "Idle";
+
+            // --- MEMORY RELEASE ---
+            clearInterval(memInterval);
+            memoryArray = []; // GC will pick this up
+            document.getElementById('mem-val').innerText = "0";
+        }
+    }
+</script>
+</body>
+</html>
